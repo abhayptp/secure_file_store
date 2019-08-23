@@ -197,17 +197,18 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 
 	// convert json to string
 	userString := string(userJson)
-	//
+	// convert string to byte slice
 	text := []byte(userString)
 
-	key := userlib.Argon2Key([]byte(password), []byte(username), uint32(userlib.AESKeySize))
-	dataStoreKey := string(userlib.Argon2Key(key, []byte(username), uint32(userlib.AESKeySize)))
+	//
+	AESKey := userlib.Argon2Key([]byte(password), []byte(username), uint32(userlib.AESKeySize))
+	dataStoreKey := string(userlib.Argon2Key(AESKey, []byte(username), uint32(userlib.AESKeySize)))
 
 	cipherText := make([]byte, userlib.BlockSize + len(text))
 
 	copy(cipherText[:userlib.BlockSize], userlib.RandomBytes(userlib.BlockSize))
 
-	stream := userlib.CFBEncrypter(key, cipherText[:userlib.BlockSize])
+	stream := userlib.CFBEncrypter(AESKey, cipherText[:userlib.BlockSize])
 	stream.XORKeyStream(cipherText[userlib.BlockSize:], text)
 
 	userlib.DatastoreSet(dataStoreKey, cipherText)
