@@ -97,6 +97,24 @@ type User struct {
 // of data []byte is a multiple of the blocksize; if
 // this is not the case, StoreFile should return an error.
 func (userdata *User) StoreFile(filename string, data []byte) (err error) {
+	userPubKey, ok := userlib.KeystoreGet(userdata.Username)
+	if !ok {
+		panic("Public key not set for given user") //Handle with suitable error
+	}
+	encFileName, err = userlib.RSAEncrypt(&userPubKey, []byte(filename), nil) //Check if we want to assign some label instead of nil
+	if err != nil {
+		panic(err)
+	}
+	h = userlib.newSHA256()
+	h.Write([]byte(userdata.Username + string(encFileName)))
+	datastoreKey = h.Sum(nil)
+	sharingRecordKey, _ = userlib.DatastoreGet(datastoreKey)
+	if sharingRecordKey == nil {
+		//
+	} else {
+		//
+	}
+
 	return nil
 }
 
