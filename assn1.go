@@ -65,7 +65,7 @@ func someUsefulThings() {
 	userlib.DebugMsg("Key is %v", key)
 }
 
-var configBlockSize = 4096  //Do not modify this variable
+var configBlockSize = 4096 //Do not modify this variable
 
 //setBlockSize - sets the global variable denoting blocksize to the passed parameter. This will be called only once in the beginning of the execution
 func setBlockSize(blocksize int) {
@@ -83,8 +83,8 @@ func bytesToUUID(data []byte) (ret uuid.UUID) {
 
 //User : User structure used to store the user information
 type User struct {
-	Username string
-	PasswordHash []byte
+	Username      string
+	PasswordHash  []byte
 	RSAPrivateKey *userlib.PrivateKey
 
 	// You can add other fields here if you want...
@@ -119,12 +119,12 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 // LoadFile is also expected to be efficient. Reading a random block from the
 // file should not fetch more than O(1) blocks from the Datastore.
 func (userdata *User) LoadFile(filename string, offset int) (data []byte, err error) {
-	return nil,nil
+	return nil, nil
 }
 
 // ShareFile : Function used to the share file with other user
 func (userdata *User) ShareFile(filename string, recipient string) (msgid string, err error) {
-	return "ad",nil
+	return "ad", nil
 }
 
 // ReceiveFile:Note recipient's filename can be different from the sender's filename.
@@ -153,7 +153,17 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 // should be able to know the sender.
 // You may want to define what you actually want to pass as a
 // sharingRecord to serialized/deserialize in the data store.
+
+type fileMetaData struct {
+	encFileName      string
+	encEncryptionKey string
+	encIntegrityKey  string
+	encLocation      string
+}
+
 type sharingRecord struct {
+	owner string
+	mUser map[string]fileMetaData
 }
 
 // This creates a user.  It will only be called once for a user
@@ -191,7 +201,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 
 	// encode User struct into a json object
 	userJson, err := json.Marshal(user)
-	if err!=nil {
+	if err != nil {
 		panic(err)
 	}
 
@@ -204,7 +214,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	AESKey := userlib.Argon2Key([]byte(password), []byte(username), uint32(userlib.AESKeySize))
 	dataStoreKey := string(userlib.Argon2Key(AESKey, []byte(username), uint32(userlib.AESKeySize)))
 
-	cipherText := make([]byte, userlib.BlockSize + len(text))
+	cipherText := make([]byte, userlib.BlockSize+len(text))
 
 	copy(cipherText[:userlib.BlockSize], userlib.RandomBytes(userlib.BlockSize))
 
@@ -213,7 +223,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 
 	userlib.DatastoreSet(dataStoreKey, cipherText)
 
-	return &user,nil
+	return &user, nil
 }
 
 // GetUser : This fetches the user information from the Datastore.  It should
@@ -221,5 +231,5 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 // data was corrupted, or if the user can't be found.
 //GetUser : function used to get the user details
 func GetUser(username string, password string) (userdataptr *User, err error) {
-	return nil,nil
+	return nil, nil
 }
