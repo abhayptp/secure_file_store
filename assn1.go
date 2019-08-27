@@ -92,12 +92,23 @@ type User struct {
 	// be public (start with a capital letter)
 }
 
+type fileInode struct {
+	curBlock        int
+	directP         [10]string
+	indirectP       string
+	doubleIndirectP string
+}
+
 // StoreFile : function used to create a  file
 // It should store the file in blocks only if length
 // of data []byte is a multiple of the blocksize; if
 // this is not the case, StoreFile should return an error.
 func (userdata *User) StoreFile(filename string, data []byte) (err error) {
-	userPubKey, ok := userlib.KeystoreGet(userdata.Username)
+	username := userdata.Username
+	if len(data)%configBlockSize != 0 {
+		panic("Datasize not multiple of configBlockSize")
+	}
+	userPubKey, ok := userlib.KeystoreGet(username)
 	if !ok {
 		panic("Public key not set for given user") //Handle with suitable error
 	}
@@ -105,12 +116,31 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 	if err != nil {
 		panic(err)
 	}
-	h = userlib.newSHA256()
-	h.Write([]byte(userdata.Username + string(encFileName)))
-	datastoreKey = h.Sum(nil)
-	sharingRecordKey, _ = userlib.DatastoreGet(datastoreKey)
+	h := userlib.newSHA256()
+	h.Write([]byte(username + string(encFileName)))
+	datastoreKey := h.Sum(nil)
+	sharingRecordKey, _ := userlib.DatastoreGet(datastoreKey)
 	if sharingRecordKey == nil {
-		//
+		//File is getting stored first time.
+		f := uuid.New()
+		sharingRecordHMACKey := RandomBytes(userlib.HashSize)
+		value := string(f) + string(sharingRecordHMACKey)
+		value := userlib.RSAEncrypt(&userPubKey, []byte(value), nil)
+		HMACKey := userlib.Argon2Key([]byte(username+filename), []byte(filename), userlib.HashSize)
+		hmac0 := userlib.NewHMAC(HMACKey)
+		hmac0.Write(value)
+		hmacValue := hmac0.Sum(nil)
+		userlib.DatastoreSet(datastoreKey, string(value)+string(hmacValue))
+
+		//Now write sharing record
+		fileLocation := userlib.Argon2Key([]byte(username+filename), []byte(userdata.PasswordHash), 16)
+		fileEncryptionKey := userlib.Argon2Key([]byte(fileLocation), []byte(userdata.PasswordHash), userlib.AESKeySize)
+		fileHMACKey := userlib.Argon2Key([]byte(fileEncryptionKey), [](userdata.PasswordHash), userlib.HashSize)
+		for i = 0; i < len(data); i += configBlockSize {
+			//
+
+		}
+
 	} else {
 		//
 	}
