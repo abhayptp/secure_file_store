@@ -99,6 +99,22 @@ type fileInode struct {
 	DoubleIndirectP string
 }
 
+func verifyHMACSign(data []byte, HMACkey []byte) (bool check) {
+	data1 = data[:len(data)-userlib.HashSize]
+	hmacVal0 := data[len(data)-userlib.HashSize:]
+	h := userlib.newSHA256(HMACkey)
+	h.Write([]byte(data1))
+	hmacVal1 := h.Sum(nil)
+	return (hmacVal0 == hmacVal1)
+}
+
+func appendHMACSign(data []byte, HMACkey []byte) (data []byte) {
+	h := userlib.newSHA256(HMACkey)
+	h.Write([]byte(data))
+	hmacSign := h.Sum(nil)
+	return append(data, hmacSign)
+}
+
 // StoreFile : function used to create a  file
 // It should store the file in blocks only if length
 // of data []byte is a multiple of the blocksize; if
