@@ -93,10 +93,10 @@ type User struct {
 }
 
 type fileInode struct {
-	curBlock        int
-	directP         [10]string
-	indirectP       string
-	doubleIndirectP string
+	CurBlock        int
+	DirectP         [10]string
+	IndirectP       string
+	DoubleIndirectP string
 }
 
 // StoreFile : function used to create a  file
@@ -203,15 +203,15 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 // sharingRecord to serialized/deserialize in the data store.
 
 type fileMetaData struct {
-	encFileName      string
-	encEncryptionKey string
-	encIntegrityKey  string
-	encLocation      string
+	EncFileName      string
+	EncEncryptionKey string
+	EncIntegrityKey  string
+	EncLocation      string
 }
 
 type sharingRecord struct {
-	owner string
-	mUser map[string]fileMetaData
+	Owner string
+	MUser map[string]fileMetaData
 }
 
 // This creates a user.  It will only be called once for a user
