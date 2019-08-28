@@ -99,51 +99,90 @@ type fileInode struct {
 	DoubleIndirectP string
 }
 
-func verifyHMACSign(data []byte, HMACkey []byte) (bool check) {
-	data1 = data[:len(data)-userlib.HashSize]
+func verifyHMACSign(data []byte, HMACkey []byte) (check bool) {
+	data1 := data[:len(data)-userlib.HashSize]
 	hmacVal0 := data[len(data)-userlib.HashSize:]
-	h := userlib.newSHA256(HMACkey)
+	h := userlib.NewHMAC(HMACkey)
 	h.Write([]byte(data1))
 	hmacVal1 := h.Sum(nil)
-	return (hmacVal0 == hmacVal1)
+	check = userlib.Equal(hmacVal0, hmacVal1)
+	return
 }
 
-func appendHMACSign(data []byte, HMACkey []byte) (data []byte) {
-	h := userlib.newSHA256(HMACkey)
+func appendHMACSign(data []byte, HMACkey []byte) (data1 []byte) {
+	h := userlib.NewHMAC(HMACkey)
 	h.Write([]byte(data))
 	hmacSign := h.Sum(nil)
-	return append(data, hmacSign)
+	data1 = append(data, hmacSign...)
+	return
 }
 
-func decryptLoad(key string, HMACKey []byte, AESKey []byte) ([]byte, err) {
-	data, ok := DatastoreGet(key)
+func decryptAESLoad(key string, HMACKey []byte, AESKey []byte) (data []byte, err error) {
+	data, ok := userlib.DatastoreGet(key)
 	if !ok || data == nil {
-		return nil
+		err = errors.New("Nil")
+		return
 	}
 	hmacSign := []byte(data[len(data)-userlib.HashSize:])
 	data = []byte(data[0 : len(data)-userlib.HashSize])
-	h := userlib.newSHA256(HMACKey)
+	h := userlib.NewHMAC(HMACKey)
 	h.Write(data)
 	hmacSign0 := h.Sum(nil)
-	if !Equal(hmacSign0, hmacSign) {
-		return errors.new("Data compromised")
+	if !userlib.Equal(hmacSign0, hmacSign) {
+		err = errors.New("Data compromised")
+		return
 	}
 	stream := userlib.CFBDecrypter(AESKey, data[:userlib.BlockSize])
 	stream.XORKeyStream(data[userlib.BlockSize:], data[userlib.BlockSize:])
-	return (data[userlib.BlockSize:])
+	data = (data[userlib.BlockSize:])
+	return
 }
 
-func encryptStore(key string, HMACKey []byte, AESKey []byte, data []byte) {
+func encryptAESStore(key string, HMACKey []byte, AESKey []byte, data []byte) {
 	cipherText := make([]byte, userlib.BlockSize+len(data))
 
 	copy(cipherText[:userlib.BlockSize], userlib.RandomBytes(userlib.BlockSize))
 
 	stream := userlib.CFBEncrypter(AESKey, cipherText[:userlib.BlockSize])
 	stream.XORKeyStream(cipherText[userlib.BlockSize:], data)
-	h := userlib.newSHA256(HMACKey)
+	h := userlib.NewHMAC(HMACKey)
 	h.Write([]byte(cipherText))
 	hmacSign := h.Sum(nil)
-	userlib.DatastoreSet(key, string(cipherText.append(hmacSign)))
+	userlib.DatastoreSet(key, (append(cipherText, hmacSign...)))
+}
+
+func encryptRSAStore(key string, HMACKey []byte, username string, data []byte) (err error) {
+	RSAPubKey, ok := userlib.KeystoreGet(username)
+	if !ok {
+		err = errors.New("RSA key not set for the user")
+		return
+	}
+	data, err = userlib.RSAEncrypt(&RSAPubKey, data, nil)
+	if err != nil {
+		panic(err)
+	}
+	h := userlib.NewHMAC(HMACKey)
+	h.Write(data)
+	hmacSign := h.Sum(nil)
+	userlib.DatastoreSet(key, append(data, hmacSign...))
+	return
+}
+
+func decryptRSALoad(key string, HMACKey []byte, RSAPrivKey *userlib.PrivateKey) (data []byte, err error) {
+	data, ok := userlib.DatastoreGet(key)
+	if !ok {
+		err = errors.New("Nothing at the key")
+	}
+	hmacSign0 := data[len(data)-userlib.HashSize:]
+	h := userlib.NewHMAC(HMACKey)
+	h.Write(data[:len(data)-userlib.HashSize])
+	hmacSign1 := h.Sum(nil)
+	if !userlib.Equal(hmacSign0, hmacSign1) {
+		err = errors.New("Data compromised")
+		return
+	}
+	data, err = userlib.RSADecrypt(RSAPrivKey, data[:len(data)-userlib.HashSize], nil)
+	return
 }
 
 // StoreFile : function used to create a  file
@@ -159,31 +198,31 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 	if !ok {
 		panic("Public key not set for given user") //Handle with suitable error
 	}
-	encFileName, err = userlib.RSAEncrypt(&userPubKey, []byte(filename), nil) //Check if we want to assign some label instead of nil
+	encFileName, err := userlib.RSAEncrypt(&userPubKey, []byte(filename), nil) //Check if we want to assign some label instead of nil
 	if err != nil {
 		panic(err)
 	}
-	h := userlib.newSHA256()
+	h := userlib.NewSHA256()
 	h.Write([]byte(username + string(encFileName)))
 	datastoreKey := h.Sum(nil)
-	sharingRecordKey, _ := userlib.DatastoreGet(datastoreKey)
+	sharingRecordKey, _ := decryptRSALoad(string(datastoreKey), []byte{1}, userdata.RSAPrivateKey)
 	if sharingRecordKey == nil {
 		//File is getting stored first time.
 		f := uuid.New()
-		sharingRecordHMACKey := RandomBytes(userlib.HashSize)
-		value := string(f) + string(sharingRecordHMACKey)
-		value := userlib.RSAEncrypt(&userPubKey, []byte(value), nil)
-		HMACKey := userlib.Argon2Key([]byte(username+filename), []byte(filename), userlib.HashSize)
+		sharingRecordHMACKey := userlib.RandomBytes(userlib.HashSize)
+		value := []byte(f.String() + string(sharingRecordHMACKey))
+		value, err = userlib.RSAEncrypt(&userPubKey, value, nil)
+		HMACKey := userlib.Argon2Key([]byte(username+filename), []byte(filename), uint32(userlib.HashSize))
 		hmac0 := userlib.NewHMAC(HMACKey)
 		hmac0.Write(value)
 		hmacValue := hmac0.Sum(nil)
-		userlib.DatastoreSet(datastoreKey, string(value)+string(hmacValue))
+		userlib.DatastoreSet(string(datastoreKey), append(value, hmacValue...))
 
 		//Now write sharing record
 		fileLocation := userlib.Argon2Key([]byte(username+filename), []byte(userdata.PasswordHash), 16)
-		fileEncryptionKey := userlib.Argon2Key([]byte(fileLocation), []byte(userdata.PasswordHash), userlib.AESKeySize)
-		fileHMACKey := userlib.Argon2Key([]byte(fileEncryptionKey), [](userdata.PasswordHash), userlib.HashSize)
-		for i = 0; i < len(data); i += configBlockSize {
+		fileEncryptionKey := userlib.Argon2Key([]byte(fileLocation), []byte(userdata.PasswordHash), uint32(userlib.AESKeySize))
+		fileHMACKey := userlib.Argon2Key([]byte(fileEncryptionKey), []byte(userdata.PasswordHash), uint32(userlib.HashSize))
+		for i := 0; i < len(data); i += configBlockSize {
 			//
 
 		}
