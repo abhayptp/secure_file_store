@@ -151,6 +151,57 @@ func encryptAESStore(key string, HMACKey []byte, AESKey []byte, data []byte) {
 	userlib.DatastoreSet(key, (append(cipherText, hmacSign...)))
 }
 
+func (file *fileInode) Load(offset int, HMACKey []byte, AESKey []byte) (data []byte, err error) {
+	blocks := offset / configBlockSize
+	if blocks < 10 {
+		data, err = decryptAESLoad(file.DirectP[blocks], HMACKey, AESKey)
+		return
+	}
+	blocks -= 10
+	if blocks <= 256 {
+		data, err = decryptAESLoad(file.IndirectP, HMACKey, AESKey)
+		if err != nil {
+			return
+		}
+		mblock := data[blocks*8 : blocks*8+8]
+		data, err = decryptAESLoad(string(mblock), HMACKey, AESKey)
+		return
+	}
+	blocks -= 256
+	indblock := blocks / 256
+	dirblock := blocks % 256
+	data, err = decryptAESLoad(file.DoubleIndirectP, HMACKey, AESKey)
+	if err != nil {
+		return
+	}
+	indblockAdd, err := decryptAESLoad(string(data[indblock*8:indblock*8+8]), HMACKey, AESKey)
+	if err != nil {
+		return
+	}
+	data, err = decryptAESLoad(string(indblockAdd), HMACKey, AESKey)
+	if err != nil {
+		return
+	}
+	dirblockAdd, err := decryptAESLoad(string(data[dirblock*8:dirblock*8+8]), HMACKey, AESKey)
+	if err != nil {
+		return
+	}
+	data, err = decryptAESLoad(string(dirblockAdd), HMACKey, AESKey)
+	return
+}
+
+func (*fileInode) Append(data []byte) (err error) {
+	//
+	return
+
+}
+
+func (*fileInode) Store(data []byte, HMACKey []byte, AESKey []byte) (err error) {
+	//
+	return
+
+}
+
 func encryptRSAStore(key string, HMACKey []byte, username string, data []byte) (err error) {
 	RSAPubKey, ok := userlib.KeystoreGet(username)
 	if !ok {
@@ -159,7 +210,7 @@ func encryptRSAStore(key string, HMACKey []byte, username string, data []byte) (
 	}
 	data, err = userlib.RSAEncrypt(&RSAPubKey, data, nil)
 	if err != nil {
-		panic(err)
+		return
 	}
 	h := userlib.NewHMAC(HMACKey)
 	h.Write(data)
@@ -172,6 +223,7 @@ func decryptRSALoad(key string, HMACKey []byte, RSAPrivKey *userlib.PrivateKey) 
 	data, ok := userlib.DatastoreGet(key)
 	if !ok {
 		err = errors.New("Nothing at the key")
+		return
 	}
 	hmacSign0 := data[len(data)-userlib.HashSize:]
 	h := userlib.NewHMAC(HMACKey)
