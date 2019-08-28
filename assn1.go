@@ -115,6 +115,37 @@ func appendHMACSign(data []byte, HMACkey []byte) (data []byte) {
 	return append(data, hmacSign)
 }
 
+func decryptLoad(key string, HMACKey []byte, AESKey []byte) ([]byte, err) {
+	data, ok := DatastoreGet(key)
+	if !ok || data == nil {
+		return nil
+	}
+	hmacSign := []byte(data[len(data)-userlib.HashSize:])
+	data = []byte(data[0 : len(data)-userlib.HashSize])
+	h := userlib.newSHA256(HMACKey)
+	h.Write(data)
+	hmacSign0 := h.Sum(nil)
+	if !Equal(hmacSign0, hmacSign) {
+		return errors.new("Data compromised")
+	}
+	stream := userlib.CFBDecrypter(AESKey, data[:userlib.BlockSize])
+	stream.XORKeyStream(data[userlib.BlockSize:], data[userlib.BlockSize:])
+	return (data[userlib.BlockSize:])
+}
+
+func encryptStore(key string, HMACKey []byte, AESKey []byte, data []byte) {
+	cipherText := make([]byte, userlib.BlockSize+len(data))
+
+	copy(cipherText[:userlib.BlockSize], userlib.RandomBytes(userlib.BlockSize))
+
+	stream := userlib.CFBEncrypter(AESKey, cipherText[:userlib.BlockSize])
+	stream.XORKeyStream(cipherText[userlib.BlockSize:], data)
+	h := userlib.newSHA256(HMACKey)
+	h.Write([]byte(cipherText))
+	hmacSign := h.Sum(nil)
+	userlib.DatastoreSet(key, string(cipherText.append(hmacSign)))
+}
+
 // StoreFile : function used to create a  file
 // It should store the file in blocks only if length
 // of data []byte is a multiple of the blocksize; if
