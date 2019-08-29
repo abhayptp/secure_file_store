@@ -153,6 +153,10 @@ func encryptAESStore(key string, HMACKey []byte, AESKey []byte, data []byte) {
 
 func (file *fileInode) Load(offset int, HMACKey []byte, AESKey []byte) (data []byte, err error) {
 	blocks := offset / configBlockSize
+	if blocks > file.CurBlock {
+		err = errors.New("Access offset greater than size of file")
+		return
+	}
 	if blocks < 10 {
 		data, err = decryptAESLoad(file.DirectP[blocks], HMACKey, AESKey)
 		return
@@ -190,14 +194,78 @@ func (file *fileInode) Load(offset int, HMACKey []byte, AESKey []byte) (data []b
 	return
 }
 
-func (*fileInode) Append(data []byte) (err error) {
-	//
+func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) (err error) {
+	if len(data)%configBlockSize != 0 {
+		err = errors.New("File length not multiple of block size")
+	}
+	blockCount := len(data) / configBlockSize
+	curBlock := 0
+	//Go to current block
+	//cbpos denote the block number which is yet not filled
+	cbpos := file.CurBlock
+	for cbpos < 10 {
+		f := uuid.New()
+		file.DirectP[cbpos] = string(f[:])
+		encryptAESStore(file.DirectP[cbpos], HMACKey, AESKey, data[curBlock*configBlockSize:curBlock*(configBlockSize+1)])
+		cbpos++
+		curBlock++
+	}
+	if curBlock == blockCount {
+		return
+	}
+	if cbpos == 10 {
+		f := uuid.New()
+		file.IndirectP = string(f[:])
+		encryptAESStore(file.IndirectP, HMACKey, AESKey, make([]byte, 256*16))
+	}
+	cbpos -= 10
+	if cbpos < 256 {
+		directp, err := decryptAESLoad(file.IndirectP, HMACKey, AESKey)
+		for cbpos < 256 {
+			f := uuid.New()
+			copy(directp[cbpos*16:(cbpos+1)*16], f[:])
+			encryptAESStore(string(directp[cbpos*16:(cbpos+1)*16]), HMACKey, AESKey, data[curBlock*configBlockSize:curBlock*(configBlockSize+1)])
+			curBlock++
+			cbpos++
+		}
+		encryptAESStore(file.IndirectP, HMACKey, AESKey, directp)
+	}
+	if curBlock == blockCount {
+		return
+	}
+	if cbpos == 256 {
+		f := uuid.New()
+		file.DoubleIndirectP = string(f[:])
+		encryptAESStore(file.DoubleIndirectP, HMACKey, AESKey, make([]byte, 256*16))
+	}
+	cbpos -= 256
+	doubleIndirectP, err := decryptAESLoad(file.DoubleIndirectP, HMACKey, AESKey)
+	for curBlock < blockCount {
+		dpos := cbpos / 256
+		if cbpos%256 == 0 {
+			f := uuid.New()
+			copy(doubleIndirectP[dpos*16:(dpos+1)*16], f[:])
+			encryptAESStore(string(doubleIndirectP[dpos*16:(dpos+1)*16]), HMACKey, AESKey, make([]byte, 256*16))
+		}
+		indirectP, err := decryptAESLoad(string(doubleIndirectP[dpos*16:(dpos+1)*16]), HMACKey, AESKey)
+		for curBlock < blockCount && cbpos%256 != 0 {
+			fpos := cbpos % 256
+			f := uuid.New()
+			copy(indirectP[fpos:fpos+16], f[:])
+			encryptAESStore(string(f[:]), HMACKey, AESKey, data[curBlock*configBlockSize:(curBlock+1)*configBlockSize])
+			curBlock++
+			cbpos++
+		}
+		encryptAESStore(string(doubleIndirectP[dpos*16:(dpos+1)*16]), HMACKey, AESKey, indirectP)
+	}
+	encryptAESStore(file.DoubleIndirectP, HMACKey, AESKey, doubleIndirectP)
 	return
 
 }
 
-func (*fileInode) Store(data []byte, HMACKey []byte, AESKey []byte) (err error) {
-	//
+func (file *fileInode) Store(data []byte, HMACKey []byte, AESKey []byte) (err error) {
+	file.CurBlock = 0
+	err = file.Append(data, HMACKey, AESKey)
 	return
 
 }
