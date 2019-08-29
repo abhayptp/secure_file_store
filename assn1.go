@@ -194,9 +194,10 @@ func (file *fileInode) Load(offset int, HMACKey []byte, AESKey []byte) (data []b
 	return
 }
 
-func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) (err error) {
+func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) error {
 	if len(data)%configBlockSize != 0 {
-		err = errors.New("File length not multiple of block size")
+		err := errors.New("File length not multiple of block size")
+		return err
 	}
 	blockCount := len(data) / configBlockSize
 	curBlock := 0
@@ -211,7 +212,7 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) (err e
 		curBlock++
 	}
 	if curBlock == blockCount {
-		return
+		return nil
 	}
 	if cbpos == 10 {
 		f := uuid.New()
@@ -221,6 +222,9 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) (err e
 	cbpos -= 10
 	if cbpos < 256 {
 		directp, err := decryptAESLoad(file.IndirectP, HMACKey, AESKey)
+		if err != nil {
+			return err
+		}
 		for cbpos < 256 {
 			f := uuid.New()
 			copy(directp[cbpos*16:(cbpos+1)*16], f[:])
@@ -231,7 +235,7 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) (err e
 		encryptAESStore(file.IndirectP, HMACKey, AESKey, directp)
 	}
 	if curBlock == blockCount {
-		return
+		return nil
 	}
 	if cbpos == 256 {
 		f := uuid.New()
@@ -240,6 +244,9 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) (err e
 	}
 	cbpos -= 256
 	doubleIndirectP, err := decryptAESLoad(file.DoubleIndirectP, HMACKey, AESKey)
+	if err != nil {
+		return err
+	}
 	for curBlock < blockCount {
 		dpos := cbpos / 256
 		if cbpos%256 == 0 {
@@ -248,6 +255,9 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) (err e
 			encryptAESStore(string(doubleIndirectP[dpos*16:(dpos+1)*16]), HMACKey, AESKey, make([]byte, 256*16))
 		}
 		indirectP, err := decryptAESLoad(string(doubleIndirectP[dpos*16:(dpos+1)*16]), HMACKey, AESKey)
+		if err != nil {
+			return err
+		}
 		for curBlock < blockCount && cbpos%256 != 0 {
 			fpos := cbpos % 256
 			f := uuid.New()
@@ -259,7 +269,7 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) (err e
 		encryptAESStore(string(doubleIndirectP[dpos*16:(dpos+1)*16]), HMACKey, AESKey, indirectP)
 	}
 	encryptAESStore(file.DoubleIndirectP, HMACKey, AESKey, doubleIndirectP)
-	return
+	return nil
 
 }
 
@@ -289,6 +299,9 @@ func encryptRSAStore(key string, HMACKey []byte, username string, data []byte) (
 
 func decryptRSALoad(key string, HMACKey []byte, RSAPrivKey *userlib.PrivateKey) (data []byte, err error) {
 	data, ok := userlib.DatastoreGet(key)
+	if data == nil {
+		return
+	}
 	if !ok {
 		err = errors.New("Nothing at the key")
 		return
@@ -312,27 +325,32 @@ func decryptRSALoad(key string, HMACKey []byte, RSAPrivKey *userlib.PrivateKey) 
 func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 	username := userdata.Username
 	if len(data)%configBlockSize != 0 {
-		panic("Datasize not multiple of configBlockSize")
+		err = errors.New("Datasize not multiple of configBlockSize")
+		return
 	}
 	userPubKey, ok := userlib.KeystoreGet(username)
 	if !ok {
-		panic("Public key not set for given user") //Handle with suitable error
+		err = errors.New("Public key not set for given user") //Handle with suitable error
+		return
 	}
 	encFileName, err := userlib.RSAEncrypt(&userPubKey, []byte(filename), nil) //Check if we want to assign some label instead of nil
 	if err != nil {
-		panic(err)
+		return
 	}
 	h := userlib.NewSHA256()
 	h.Write([]byte(username + string(encFileName)))
 	datastoreKey := h.Sum(nil)
-	sharingRecordKey, _ := decryptRSALoad(string(datastoreKey), []byte{1}, userdata.RSAPrivateKey)
+	HMACKey := userlib.Argon2Key([]byte(username+filename), []byte(filename), uint32(userlib.HashSize))
+	sharingRecordKey, err := decryptRSALoad(string(datastoreKey), HMACKey, userdata.RSAPrivateKey)
+	if err != nil {
+		return
+	}
 	if sharingRecordKey == nil {
 		//File is getting stored first time.
 		f := uuid.New()
 		sharingRecordHMACKey := userlib.RandomBytes(userlib.HashSize)
-		value := []byte(f.String() + string(sharingRecordHMACKey))
+		value := []byte(string(f[:]) + string(sharingRecordHMACKey))
 		value, err = userlib.RSAEncrypt(&userPubKey, value, nil)
-		HMACKey := userlib.Argon2Key([]byte(username+filename), []byte(filename), uint32(userlib.HashSize))
 		hmac0 := userlib.NewHMAC(HMACKey)
 		hmac0.Write(value)
 		hmacValue := hmac0.Sum(nil)
@@ -340,15 +358,88 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 
 		//Now write sharing record
 		fileLocation := userlib.Argon2Key([]byte(username+filename), []byte(userdata.PasswordHash), 16)
-		fileEncryptionKey := userlib.Argon2Key([]byte(fileLocation), []byte(userdata.PasswordHash), uint32(userlib.AESKeySize))
-		fileHMACKey := userlib.Argon2Key([]byte(fileEncryptionKey), []byte(userdata.PasswordHash), uint32(userlib.HashSize))
-		for i := 0; i < len(data); i += configBlockSize {
-			//
+		fileAESKey := userlib.Argon2Key([]byte(fileLocation), []byte(userdata.PasswordHash), uint32(userlib.AESKeySize))
+		fileHMACKey := userlib.Argon2Key([]byte(fileAESKey), []byte(userdata.PasswordHash), uint32(userlib.HashSize))
 
+		encFileName, err1 := userlib.RSAEncrypt(&userPubKey, []byte(filename), nil)
+		err = err1
+		if err1 != nil {
+			return
+		}
+		encFileLocation, err1 := userlib.RSAEncrypt(&userPubKey, []byte(fileLocation), nil)
+		err = err1
+		if err != nil {
+			return
+		}
+		encFileAESKey, err1 := userlib.RSAEncrypt(&userPubKey, []byte(fileAESKey), nil)
+		err = err1
+		if err != nil {
+			return
+		}
+		encFileHMACKey, err1 := userlib.RSAEncrypt(&userPubKey, []byte(fileHMACKey), nil)
+		err = err1
+		if err != nil {
+			return
 		}
 
+		sharingRecord := sharingRecord{}
+		sharingRecord.Owner = userdata.Username
+		sharingRecord.MUser[userdata.Username] = fileMetaData{string(encFileName), string(encFileAESKey), string(encFileHMACKey), string(encFileLocation)}
+		js, err1 := json.Marshal(sharingRecord)
+		err = err1
+		if err != nil {
+			return
+		}
+		userlib.DatastoreSet(string(f[:]), []byte(string(js)))
+
+		fileInode := fileInode{}
+		fileInode.CurBlock = 0
+		js, err1 = json.Marshal(fileInode)
+		err = err1
+		if err != nil {
+			return
+		}
+		js = []byte(string(js))
+		encryptAESStore(string(fileLocation), fileHMACKey, fileAESKey, js)
+		fileInode.Store(data, fileHMACKey, fileAESKey)
+
 	} else {
-		//
+		sharingRecordJsonByte, ok := userlib.DatastoreGet(string(sharingRecordKey))
+		if !ok {
+			err = errors.New("Error in fetching data from datastore")
+			return
+		}
+		var sharingRecord sharingRecord
+		err = json.Unmarshal(sharingRecordJsonByte, &sharingRecord)
+		if err != nil {
+			return
+		}
+		fileLocation, err1 := userlib.RSADecrypt(userdata.RSAPrivateKey, []byte((sharingRecord.MUser[userdata.Username]).EncLocation), nil)
+		err = err1
+		if err != nil {
+			return
+		}
+		fileHMACKey, err1 := userlib.RSADecrypt(userdata.RSAPrivateKey, []byte((sharingRecord.MUser[userdata.Username]).EncHMACKey), nil)
+		err = err1
+		if err != nil {
+			return
+		}
+		fileAESKey, err1 := userlib.RSADecrypt(userdata.RSAPrivateKey, []byte((sharingRecord.MUser[userdata.Username]).EncAESKey), nil)
+		err = err1
+		if err != nil {
+			return
+		}
+		fileInodeJsonBytes, err1 := decryptAESLoad(string(fileLocation), fileHMACKey, fileAESKey)
+		err = err1
+		if err != nil {
+			return
+		}
+		var fileInode fileInode
+		err = json.Unmarshal(fileInodeJsonBytes, &fileInode)
+		if err != nil {
+			return
+		}
+		err = fileInode.Store(data, fileHMACKey, fileAESKey)
 	}
 
 	return nil
@@ -361,7 +452,115 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 // the block size; if it is not, AppendFile must return an error.
 // AppendFile : Function to append the file
 func (userdata *User) AppendFile(filename string, data []byte) (err error) {
-	return nil
+	username := userdata.Username
+	if len(data)%configBlockSize != 0 {
+		return errors.New("Datasize not multiple of configBlockSize")
+	}
+	userPubKey, ok := userlib.KeystoreGet(username)
+	if !ok {
+		panic("Public key not set for given user") //Handle with suitable error
+	}
+	encFileName, err := userlib.RSAEncrypt(&userPubKey, []byte(filename), nil) //Check if we want to assign some label instead of nil
+	if err != nil {
+		panic(err)
+	}
+	h := userlib.NewSHA256()
+	h.Write([]byte(username + string(encFileName)))
+	datastoreKey := h.Sum(nil)
+	HMACKey := userlib.Argon2Key([]byte(username+filename), []byte(filename), uint32(userlib.HashSize))
+	sharingRecordKey, err := decryptRSALoad(string(datastoreKey), HMACKey, userdata.RSAPrivateKey)
+	if err != nil {
+		return err
+	}
+	if sharingRecordKey == nil {
+		//File is getting stored first time.
+		f := uuid.New()
+		sharingRecordHMACKey := userlib.RandomBytes(userlib.HashSize)
+		value := []byte(string(f[:]) + string(sharingRecordHMACKey))
+		value, err = userlib.RSAEncrypt(&userPubKey, value, nil)
+		hmac0 := userlib.NewHMAC(HMACKey)
+		hmac0.Write(value)
+		hmacValue := hmac0.Sum(nil)
+		userlib.DatastoreSet(string(datastoreKey), append(value, hmacValue...))
+
+		//Now write sharing record
+		fileLocation := userlib.Argon2Key([]byte(username+filename), []byte(userdata.PasswordHash), 16)
+		fileAESKey := userlib.Argon2Key([]byte(fileLocation), []byte(userdata.PasswordHash), uint32(userlib.AESKeySize))
+		fileHMACKey := userlib.Argon2Key([]byte(fileAESKey), []byte(userdata.PasswordHash), uint32(userlib.HashSize))
+
+		encFileName, err := userlib.RSAEncrypt(&userPubKey, []byte(filename), nil)
+		if err != nil {
+			return err
+		}
+		encFileLocation, err := userlib.RSAEncrypt(&userPubKey, []byte(fileLocation), nil)
+		if err != nil {
+			return err
+		}
+		encFileAESKey, err := userlib.RSAEncrypt(&userPubKey, []byte(fileAESKey), nil)
+		if err != nil {
+			return err
+		}
+		encFileHMACKey, err := userlib.RSAEncrypt(&userPubKey, []byte(fileHMACKey), nil)
+		if err != nil {
+			return err
+		}
+
+		sharingRecord := sharingRecord{}
+		sharingRecord.Owner = userdata.Username
+		sharingRecord.MUser[userdata.Username] = fileMetaData{string(encFileName), string(encFileAESKey), string(encFileHMACKey), string(encFileLocation)}
+		js, err := json.Marshal(sharingRecord)
+		if err != nil {
+			return err
+		}
+		userlib.DatastoreSet(string(f[:]), []byte(string(js)))
+
+		fileInode := fileInode{}
+		fileInode.CurBlock = 0
+		js, err = json.Marshal(fileInode)
+		if err != nil {
+			return err
+		}
+		js = []byte(string(js))
+		encryptAESStore(string(fileLocation), fileHMACKey, fileAESKey, js)
+		fileInode.Store(data, fileHMACKey, fileAESKey)
+
+	} else {
+		sharingRecordJsonByte, ok := userlib.DatastoreGet(string(sharingRecordKey))
+		if !ok {
+			return errors.New("Error in fetching data from datastore")
+		}
+		var sharingRecord sharingRecord
+		err := json.Unmarshal(sharingRecordJsonByte, &sharingRecord)
+		if err != nil {
+			return err
+		}
+		fileLocation, err := userlib.RSADecrypt(userdata.RSAPrivateKey, []byte((sharingRecord.MUser[userdata.Username]).EncLocation), nil)
+		if err != nil {
+			return err
+		}
+		fileHMACKey, err := userlib.RSADecrypt(userdata.RSAPrivateKey, []byte((sharingRecord.MUser[userdata.Username]).EncHMACKey), nil)
+		if err != nil {
+			return err
+		}
+		fileAESKey, err := userlib.RSADecrypt(userdata.RSAPrivateKey, []byte((sharingRecord.MUser[userdata.Username]).EncAESKey), nil)
+		if err != nil {
+			return err
+		}
+		fileInodeJsonBytes, err := decryptAESLoad(string(fileLocation), fileHMACKey, fileAESKey)
+		if err != nil {
+			return err
+		}
+		var fileInode fileInode
+		err = json.Unmarshal(fileInodeJsonBytes, &fileInode)
+		if err != nil {
+			return err
+		}
+		err = fileInode.Append(data, fileHMACKey, fileAESKey)
+
+		//
+	}
+
+	return
 }
 
 // LoadFile :This loads a block from a file in the Datastore.
@@ -373,7 +572,62 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 // LoadFile is also expected to be efficient. Reading a random block from the
 // file should not fetch more than O(1) blocks from the Datastore.
 func (userdata *User) LoadFile(filename string, offset int) (data []byte, err error) {
-	return nil, nil
+	username := userdata.Username
+	userPubKey, ok := userlib.KeystoreGet(username)
+	if !ok {
+		panic("Public key not set for given user") //Handle with suitable error
+	}
+	encFileName, err := userlib.RSAEncrypt(&userPubKey, []byte(filename), nil) //Check if we want to assign some label instead of nil
+	if err != nil {
+		panic(err)
+	}
+	h := userlib.NewSHA256()
+	h.Write([]byte(username + string(encFileName)))
+	datastoreKey := h.Sum(nil)
+	HMACKey := userlib.Argon2Key([]byte(username+filename), []byte(filename), uint32(userlib.HashSize))
+	sharingRecordKey, err := decryptRSALoad(string(datastoreKey), HMACKey, userdata.RSAPrivateKey)
+	if sharingRecordKey == nil || err != nil {
+		err = errors.New("No such file exists")
+		return
+	}
+	sharingRecordJsonByte, ok := userlib.DatastoreGet(string(sharingRecordKey))
+	if !ok {
+		err = errors.New("Error in fetching data from datastore")
+		return
+	}
+	var sharingRecord sharingRecord
+	err = json.Unmarshal(sharingRecordJsonByte, &sharingRecord)
+	if err != nil {
+		return
+	}
+	_, ok = sharingRecord.MUser[userdata.Username]
+	if !ok {
+		err = errors.New("Data compromised")
+		return
+	}
+	fileLocation, err := userlib.RSADecrypt(userdata.RSAPrivateKey, []byte((sharingRecord.MUser[userdata.Username]).EncLocation), nil)
+	if err != nil {
+		return
+	}
+	fileHMACKey, err := userlib.RSADecrypt(userdata.RSAPrivateKey, []byte((sharingRecord.MUser[userdata.Username]).EncHMACKey), nil)
+	if err != nil {
+		return
+	}
+	fileAESKey, err := userlib.RSADecrypt(userdata.RSAPrivateKey, []byte((sharingRecord.MUser[userdata.Username]).EncAESKey), nil)
+	if err != nil {
+		return
+	}
+	fileInodeJsonBytes, err := decryptAESLoad(string(fileLocation), fileHMACKey, fileAESKey)
+	if err != nil {
+		return
+	}
+	var fileInode fileInode
+	err = json.Unmarshal(fileInodeJsonBytes, &fileInode)
+	if err != nil {
+		return
+	}
+	data, err = fileInode.Load(offset, fileHMACKey, fileAESKey)
+	return
 }
 
 // ShareFile : Function used to the share file with other user
@@ -409,10 +663,10 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 // sharingRecord to serialized/deserialize in the data store.
 
 type fileMetaData struct {
-	EncFileName      string
-	EncEncryptionKey string
-	EncIntegrityKey  string
-	EncLocation      string
+	EncFileName string
+	EncAESKey   string
+	EncHMACKey  string
+	EncLocation string
 }
 
 type sharingRecord struct {
