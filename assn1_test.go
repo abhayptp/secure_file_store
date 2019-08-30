@@ -121,6 +121,7 @@ func TestFileShareReceive(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+	
 	data1, err1 := u1.LoadFile("file1", 0)
 	if err1 != nil {
 		t.Error(err1)
