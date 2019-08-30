@@ -197,6 +197,7 @@ func (file *fileInode) Load(offset int, HMACKey []byte, AESKey []byte) (data []b
 	if err != nil {
 		return
 	}
+	userlib.DebugMsg("direct block pointer %x\n", indblockAdd[dirblock*16:(dirblock+1)*16])
 	data, err = decryptAESLoad(string(indblockAdd[dirblock*16:(dirblock+1)*16]), HMACKey, AESKey)
 	userlib.DebugMsg("direct block address 3 %x", data)
 
@@ -292,7 +293,7 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) error 
 		for curBlock < blockCount && cbpos%256 != 0 {
 			fpos = cbpos % 256
 			f = uuid.New()
-			copy(indirectP[fpos:fpos+16], f[:])
+			copy(indirectP[fpos*16:(fpos+1)*16], f[:])
 			encryptAESStore(string(f[:]), HMACKey, AESKey, data[curBlock*configBlockSize:(curBlock+1)*configBlockSize])
 			curBlock++
 			cbpos++
