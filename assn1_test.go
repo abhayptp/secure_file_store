@@ -121,7 +121,7 @@ func TestFileShareReceive(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	
+
 	data1, err1 := u1.LoadFile("file1", 0)
 	if err1 != nil {
 		t.Error(err1)
@@ -137,4 +137,20 @@ func TestFileShareReceive(t *testing.T) {
 	}
 
 	// add test cases here
+}
+
+func TestFileRevoke(t *testing.T) {
+	u1, _ := GetUser("abhays", "adfsadf")
+	u2, _ := GetUser("nishankm", "dfadsf")
+	err := u1.RevokeFile("file1")
+	if err != nil {
+		t.Error(err)
+	}
+	_, err1 := u2.LoadFile("file2", 0)
+	if err1 == nil {
+		t.Error(err1)
+	} else {
+		t.Log(err1)
+	}
+
 }

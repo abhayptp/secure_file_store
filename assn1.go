@@ -864,6 +864,7 @@ func (userdata *User) GetSharingRecordMetadata(filename string) (sharingRecordKe
 	userlib.DebugMsg("load datastore key %x", datastoreKey)
 	HMACKey := userlib.Argon2Key([]byte(username+filename), []byte(userdata.PasswordHash), uint32(userlib.HashSize))
 	sharingR, err := decryptRSALoad(string(datastoreKey), HMACKey, userdata.RSAPrivateKey)
+	userlib.DebugMsg("sharingR metadata %x", sharingR)
 	if err != nil {
 		return
 	}
@@ -876,12 +877,17 @@ func (userdata *User) GetSharingRecordMetadata(filename string) (sharingRecordKe
 
 func (userdata *User) GetSharingRecord(username string, filename string) (sharingRecord sharingRecord, err error) {
 	sharingRecordKey, sharingRecordHMACKey, err1 := userdata.GetSharingRecordMetadata(filename)
+	userlib.DebugMsg("sharingRecordKey %x", sharingRecordKey)
 	err = err1
 	if err != nil {
 		return
 	}
 	//userlib.DebugMsg("load sharing record key %x", sharingRecordKey)
 	sharingRecordJsonByte, ok := userlib.DatastoreGet(string(sharingRecordKey))
+	if !ok {
+		err = errors.New("File does not exists for given user")
+		return
+	}
 	//userlib.DebugMsg("load sharing record %x", sharingRecordJsonByte)
 
 	h2 := userlib.NewHMAC(sharingRecordHMACKey)
@@ -1000,21 +1006,21 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 // it is authentically from the sender.
 // ReceiveFile : function used to receive the file details from the sender
 func (userdata *User) ReceiveFile(filename string, sender string, msgid string) error {
-		userlib.DebugMsg("ok")
+	userlib.DebugMsg("ok")
 	username := userdata.Username
 
 	senderPublicKey, ok := userlib.KeystoreGet(sender)
-		userlib.DebugMsg("%x", senderPublicKey)
+	userlib.DebugMsg("%x", senderPublicKey)
 
 	if !ok {
 		return errors.New("Public key does not exist for this user.")
 	}
-		userlib.DebugMsg("%x", msgid)
+	userlib.DebugMsg("%x", msgid)
 	err := userlib.RSAVerify(&senderPublicKey, []byte(msgid[8*userlib.HashSize:]), []byte(msgid[:8*userlib.HashSize]))
 	if err != nil {
 		return err
 	}
-		userlib.DebugMsg("ok 5")
+	userlib.DebugMsg("ok 5")
 	msg, err := userlib.RSADecrypt(userdata.RSAPrivateKey, []byte(msgid[8*userlib.HashSize:]), nil)
 	if err != nil {
 		return err
@@ -1078,7 +1084,7 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 	h2.Write(js)
 	js = append(js, h2.Sum(nil)...)
 
-	userlib.DatastoreSet(string(js), sharingRecordKey)
+	userlib.DatastoreSet(string(sharingRecordKey), js)
 
 	h := userlib.NewSHA256()
 	h.Write([]byte(filename))
@@ -1089,7 +1095,7 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 
 	HMACKey := userlib.Argon2Key([]byte(username+filename), []byte(userdata.PasswordHash), uint32(userlib.HashSize))
 
-	err1 := encryptRSAStore(string(sharingRecordUUIDkey), HMACKey, username, sharingRecordKey)
+	err1 := encryptRSAStore(string(sharingRecordUUIDkey), HMACKey, username, msg[:16+userlib.HashSize])
 	if err1 != nil {
 		return err
 	}
@@ -1108,6 +1114,7 @@ func Hash(data []byte) (result []byte) {
 
 func (userdata *User) RevokeFile(filename string) (err error) {
 	sharingRecord, err1 := userdata.GetSharingRecord(userdata.Username, filename)
+	userlib.DebugMsg("owner %s", sharingRecord.Owner)
 	err = err1
 	if err != nil {
 		return err
@@ -1116,10 +1123,12 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 		err = errors.New("You are not owner of this file")
 		return
 	}
+	userlib.DebugMsg("owner %s", sharingRecord.Owner)
+	//Below, EncFileName denotes hash of file name
 	for k, v := range sharingRecord.MUser {
 		h1 := Hash([]byte(k + string(v.EncFileName)))
-		userlib.DatastoreDelete(string(h1))
 		if k != sharingRecord.Owner {
+			userlib.DatastoreDelete(string(h1))
 			delete(sharingRecord.MUser, k)
 		}
 	}
