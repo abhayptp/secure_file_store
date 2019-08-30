@@ -39,18 +39,19 @@ func TestFileStoreLoadAppend(t *testing.T) {
 	if err1 != nil {
 		t.Error(err1)
 	}
-	data1 := userlib.RandomBytes(4096 * 11)
+	n := 800
+	data1 := userlib.RandomBytes(4096 * n)
 	err := u1.StoreFile("file1", data1)
 	if err != nil {
 		t.Error(err)
 	}
 
-	data2, err1 := u1.LoadFile("file1", 10)
+	data2, err1 := u1.LoadFile("file1", (n - 1))
 	if err1 != nil {
 		t.Error(err1)
 	}
 
-	if !reflect.DeepEqual(data1[4096*10:], data2) {
+	if !reflect.DeepEqual(data1[4096*(n-1):], data2) {
 		t.Error("data corrupted")
 	} else {
 		t.Log("data is not corrupted")

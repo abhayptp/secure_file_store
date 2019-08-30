@@ -153,7 +153,7 @@ func encryptAESStore(key string, HMACKey []byte, AESKey []byte, data []byte) {
 
 func (file *fileInode) Load(offset int, HMACKey []byte, AESKey []byte) (data []byte, err error) {
 	blocks := offset
-	//userlib.DebugMsg("cur block: %d", file.CurBlock)
+	userlib.DebugMsg("cur block: %d", file.CurBlock)
 	if blocks >= file.CurBlock {
 		err = errors.New("Access offset greater than size of file")
 		return
@@ -215,7 +215,7 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) error 
 		curBlock++
 	}
 	file.CurBlock = cbpos
-	//userlib.DebugMsg("adfsf %d %d %d\n", file.CurBlock, curBlock, blockCount)
+	userlib.DebugMsg("adfsf %d %d %d\n", file.CurBlock, curBlock, blockCount)
 	if curBlock == blockCount {
 		return nil
 	}
@@ -239,7 +239,8 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) error 
 		}
 		encryptAESStore(string(file.IndirectP), HMACKey, AESKey, directp)
 	}
-	file.CurBlock = cbpos
+	userlib.DebugMsg("adfsf %d %d %d\n", file.CurBlock, curBlock, blockCount)
+	file.CurBlock = cbpos + 10
 	if curBlock == blockCount {
 		return nil
 	}
@@ -264,6 +265,13 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) error 
 		if err != nil {
 			return err
 		}
+		fpos := cbpos % 256
+		f := uuid.New()
+		copy(indirectP[fpos:fpos+16], f[:])
+		encryptAESStore(string(f[:]), HMACKey, AESKey, data[curBlock*configBlockSize:(curBlock+1)*configBlockSize])
+		curBlock++
+		cbpos++
+
 		for curBlock < blockCount && cbpos%256 != 0 {
 			fpos := cbpos % 256
 			f := uuid.New()
@@ -274,7 +282,7 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) error 
 		}
 		encryptAESStore(string(doubleIndirectP[dpos*16:(dpos+1)*16]), HMACKey, AESKey, indirectP)
 	}
-	file.CurBlock = cbpos
+	file.CurBlock = cbpos + 256 + 10
 	encryptAESStore(string(file.DoubleIndirectP), HMACKey, AESKey, doubleIndirectP)
 	return nil
 
