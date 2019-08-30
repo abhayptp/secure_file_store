@@ -863,7 +863,6 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 	fileAESKey, err := userlib.RSADecrypt(userdata.RSAPrivateKey, []byte((sharingRecord.MUser[userdata.Username]).EncAESKey), nil)
 	if err != nil {
 		return
-
 	}
 	//sharingRecordKey + HMACKeySharingRecord + FileEncKey + FileHMACKey +  fileLocation
 
@@ -879,8 +878,7 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 	if err!=nil{
 		return
 	}
-	msgid = string(append(msg, sign...))
-	userlib.DebugMsg(string(msgid))
+	msgid = string(append(sign, msg...))
 	return
 }
 
@@ -890,11 +888,99 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 // it is authentically from the sender.
 // ReceiveFile : function used to receive the file details from the sender
 func (userdata *User) ReceiveFile(filename string, sender string, msgid string) error {
+	username := userdata.Username
+
+	senderPublicKey,ok := userlib.KeystoreGet(sender)
+	if !ok{
+		return errors.New("Public key does not exist for this user.")
+	}
+	err := userlib.RSAVerify(&senderPublicKey, []byte(msgid[userlib.RSAKeySize:]), []byte(msgid[:userlib.RSAKeySize]))
+	if err!=nil{
+		return err
+	}
+	msg, err := userlib.RSADecrypt(userdata.RSAPrivateKey, []byte(msgid[userlib.RSAKeySize:]), nil)
+	if err!=nil{
+		return err
+	}
+	sharingRecordKey := msg[:16]
+	sharingRecordHMACKey := msg[16: 16+userlib.HashSize]
+	fileAESKey := string(msg[16+userlib.HashSize: 16+userlib.HashSize+userlib.AESKeySize])
+	fileHMACKey := string(msg[16+userlib.HashSize+userlib.AESKeySize: 16+2*userlib.HashSize+userlib.AESKeySize])
+	fileLocation := string(msg[16+2*userlib.HashSize+userlib.AESKeySize: 32+2*userlib.HashSize+userlib.AESKeySize])
+
+	userPubKey := userdata.RSAPrivateKey.PublicKey
+	encFileName, err := userlib.RSAEncrypt(&userPubKey, []byte(filename), nil)
+	if err != nil {
+		return err
+	}
+	encFileLocation, err := userlib.RSAEncrypt(&userPubKey, []byte(fileLocation), nil)
+	if err != nil {
+		return err
+	}
+	encFileAESKey, err := userlib.RSAEncrypt(&userPubKey, []byte(fileAESKey), nil)
+	if err != nil {
+		return err
+	}
+	encFileHMACKey, err := userlib.RSAEncrypt(&userPubKey, []byte(fileHMACKey), nil)
+	if err != nil {
+		return err
+	}
+
+	sharingRecordData, ok := userlib.DatastoreGet(string(sharingRecordKey))
+	if !ok{
+		return errors.New("Incorrect Message")
+	}
+
+	verified := verifyHMACSign(sharingRecordData, sharingRecordHMACKey)
+	if !verified{
+		return errors.New("Sharing Record compromised")
+	}
+	sharingRecordJsonByte := sharingRecordData[:len(sharingRecordData)-userlib.HashSize]
+
+	var sharingRecord sharingRecord
+	err = json.Unmarshal(sharingRecordJsonByte, &sharingRecord)
+	if err != nil {
+		return err
+	}
+
+	ff := fileMetaData{}
+	ff.EncAESKey = (encFileAESKey)
+	ff.EncHMACKey = (encFileHMACKey)
+	ff.EncLocation = (encFileLocation)
+	ff.EncFileName = (encFileName)
+	sharingRecord.MUser[userdata.Username] = ff
+
+	//sharingRecord.MUser[userdata.Username] = fileMetaData{(encFileName), (encFileAESKey), (encFileHMACKey), (encFileLocation)}
+	js, err := json.Marshal(sharingRecord)
+	if err != nil {
+		return err
+	}
+	h2 := userlib.NewHMAC(sharingRecordHMACKey)
+	h2.Write(js)
+	js = append(js, h2.Sum(nil)...)
+
+	userlib.DatastoreSet(string(js), sharingRecordKey)
+
+	h := userlib.NewSHA256()
+	h.Write([]byte(filename))
+	hashedFileName := string(h.Sum(nil))
+	h = userlib.NewSHA256()
+	h.Write([]byte(username + hashedFileName))
+	sharingRecordUUIDkey := h.Sum(nil)
+
+	HMACKey := userlib.Argon2Key([]byte(username+filename), []byte(userdata.PasswordHash), uint32(userlib.HashSize))
+
+	err1 := encryptRSAStore(string(sharingRecordUUIDkey), HMACKey, username, sharingRecordKey)
+	if err1!=nil{
+		return err
+	}
+
 	return nil
 }
 
 // RevokeFile : function used revoke the shared file access
 func (userdata *User) RevokeFile(filename string) (err error) {
+
 	return nil
 }
 
