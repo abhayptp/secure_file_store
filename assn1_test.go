@@ -34,12 +34,12 @@ func TestUserStorage(t *testing.T) {
 	// add more test cases here
 }
 
-func TestFileStoreLoadAppend(t *testing.T) {
+func TestFileStoreLoadAppend1(t *testing.T) {
 	u1, err1 := GetUser("abhays", "adfsadf")
 	if err1 != nil {
 		t.Error(err1)
 	}
-	n := 800
+	n := 1
 	data1 := userlib.RandomBytes(4096 * n)
 	err := u1.StoreFile("file1", data1)
 	if err != nil {
@@ -70,6 +70,69 @@ func TestFileStoreLoadAppend(t *testing.T) {
 	// add test cases here
 }
 
+func TestFileStoreLoadAppend(t *testing.T) {
+	u1, err1 := GetUser("abhays", "adfsadf")
+	if err1 != nil {
+		t.Error(err1)
+	}
+	n := 700
+	data1 := userlib.RandomBytes(4096 * n)
+	err := u1.StoreFile("file2", data1)
+	if err != nil {
+		t.Error(err)
+	}
+	data2 := userlib.RandomBytes(4096)
+	err1 = u1.AppendFile("file2", data2)
+	if err1 != nil {
+		t.Error(err1)
+	}
+	data3, err2 := u1.LoadFile("file2", n)
+	if err2 != nil {
+		t.Error(err2)
+	}
+
+	if !reflect.DeepEqual(data3, data2) {
+		t.Error("data corrupted")
+	} else {
+		t.Log("data is not corrupted")
+	}
+	//err = u1.AppendFile("file1", data1)
+	//if err != nil {
+	//t.Error(err)
+	//}
+	//data2, err1 = u1.LoadFile("file1", 0)
+	//if !reflect.DeepEqual(data1, data2) {
+	//t.Error("data corrupted")
+	//} else {
+	//t.Log("data is not corrupted")
+	//}
+
+	// add test cases here
+}
+
 func TestFileShareReceive(t *testing.T) {
+	u2, _ = InitUser("nishankm", "dfadsf")
+	msgId, err := u1.ShareFile("file1", u2)
+	if err != nil {
+		t.Error(err)
+	}
+	err = u2.ReceiveFile("file2", u1, msgId)
+	if err != nil {
+		t.Error(err)
+	}
+	data1, err1 := u1.Load("file1", 0)
+	if err1 != nil {
+		t.Error(err1)
+	}
+	data2, err2 := u2.Load("file2", 0)
+	if err2 != nil {
+		t.Error(err2)
+	}
+	if !reflect.DeepEqual(data2, data3) {
+		t.Error("data is corrupted")
+	} else {
+		t.Log("data is not corrupted")
+	}
+
 	// add test cases here
 }
