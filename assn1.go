@@ -871,9 +871,16 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 
 	userPubKey, ok := userlib.KeystoreGet(username)
 
-	msgid = userlib.RSAEncrypt(&userPubKey, msgId, nil)
-	//sign :=
-
+	msg, err := userlib.RSAEncrypt(&userPubKey, msgId, nil)
+	if err!=nil {
+		return
+	}
+	sign,err := userlib.RSASign(userdata.RSAPrivateKey, msg)
+	if err!=nil{
+		return
+	}
+	msgid = string(append(msg, sign...))
+	userlib.DebugMsg(string(msgid))
 	return
 }
 
