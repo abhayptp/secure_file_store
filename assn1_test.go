@@ -111,24 +111,25 @@ func TestFileStoreLoadAppend(t *testing.T) {
 }
 
 func TestFileShareReceive(t *testing.T) {
-	u2, _ = InitUser("nishankm", "dfadsf")
-	msgId, err := u1.ShareFile("file1", u2)
+	u1, _ := GetUser("abhays", "adfsadf")
+	u2, _ := InitUser("nishankm", "dfadsf")
+	msgId, err := u1.ShareFile("file1", u2.Username)
 	if err != nil {
 		t.Error(err)
 	}
-	err = u2.ReceiveFile("file2", u1, msgId)
+	err = u2.ReceiveFile("file2", u1.Username, msgId)
 	if err != nil {
 		t.Error(err)
 	}
-	data1, err1 := u1.Load("file1", 0)
+	data1, err1 := u1.LoadFile("file1", 0)
 	if err1 != nil {
 		t.Error(err1)
 	}
-	data2, err2 := u2.Load("file2", 0)
+	data2, err2 := u2.LoadFile("file2", 0)
 	if err2 != nil {
 		t.Error(err2)
 	}
-	if !reflect.DeepEqual(data2, data3) {
+	if !reflect.DeepEqual(data1, data2) {
 		t.Error("data is corrupted")
 	} else {
 		t.Log("data is not corrupted")
