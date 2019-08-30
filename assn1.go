@@ -153,7 +153,7 @@ func encryptAESStore(key string, HMACKey []byte, AESKey []byte, data []byte) {
 
 func (file *fileInode) Load(offset int, HMACKey []byte, AESKey []byte) (data []byte, err error) {
 	blocks := offset
-	userlib.DebugMsg("cur block: %d", file.CurBlock)
+	userlib.DebugMsg("hello cur block: %d", file.CurBlock, blocks)
 	if blocks >= file.CurBlock {
 		err = errors.New("Access offset greater than size of file")
 		return
@@ -164,7 +164,11 @@ func (file *fileInode) Load(offset int, HMACKey []byte, AESKey []byte) (data []b
 		return
 	}
 	blocks -= 10
-	if blocks <= 256 {
+	//if blocks == 0 {
+	//return
+	//}
+	userlib.DebugMsg("hello blocks %d\n", blocks)
+	if blocks < 256 {
 		data, err = decryptAESLoad(string(file.IndirectP), HMACKey, AESKey)
 		if err != nil {
 			return
@@ -174,25 +178,37 @@ func (file *fileInode) Load(offset int, HMACKey []byte, AESKey []byte) (data []b
 		return
 	}
 	blocks -= 256
+	//if blocks == 0 {
+	//return
+	//}
+	userlib.DebugMsg("hello load blocks %d\n", blocks)
 	indblock := blocks / 256
 	dirblock := blocks % 256
 	data, err = decryptAESLoad(string(file.DoubleIndirectP), HMACKey, AESKey)
+	userlib.DebugMsg("direct block address %x", data)
+
 	if err != nil {
 		return
 	}
 	indblockAdd, err := decryptAESLoad(string(data[indblock*16:indblock*16+16]), HMACKey, AESKey)
+	userlib.DebugMsg("indirect block direct block %d %d\n", indblock, dirblock)
+	userlib.DebugMsg("direct block address 2 %x", indblockAdd)
+
 	if err != nil {
 		return
 	}
-	data, err = decryptAESLoad(string(indblockAdd), HMACKey, AESKey)
+	data, err = decryptAESLoad(string(indblockAdd[dirblock*16:(dirblock+1)*16]), HMACKey, AESKey)
+	userlib.DebugMsg("direct block address 3 %x", data)
+
 	if err != nil {
 		return
 	}
-	dirblockAdd, err := decryptAESLoad(string(data[dirblock*16:dirblock*16+16]), HMACKey, AESKey)
-	if err != nil {
-		return
-	}
-	data, err = decryptAESLoad(string(dirblockAdd), HMACKey, AESKey)
+	//dirblockAdd, err := decryptAESLoad(string(data[dirblock*16:dirblock*16+16]), HMACKey, AESKey)
+	//userlib.DebugMsg("direct block address %x", dirblockAdd)
+	//if err != nil {
+	//return
+	//}
+	//data, err = decryptAESLoad(string(dirblockAdd), HMACKey, AESKey)
 	return
 }
 
@@ -244,6 +260,7 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) error 
 	if curBlock == blockCount {
 		return nil
 	}
+	userlib.DebugMsg("cbpos %d %d %d\n", cbpos, curBlock, blockCount)
 	if cbpos == 256 {
 		f := uuid.New()
 		file.DoubleIndirectP = (f[:])
@@ -271,10 +288,10 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) error 
 		encryptAESStore(string(f[:]), HMACKey, AESKey, data[curBlock*configBlockSize:(curBlock+1)*configBlockSize])
 		curBlock++
 		cbpos++
-
+		userlib.DebugMsg("curBlock cbpos %d %d\n", curBlock, cbpos)
 		for curBlock < blockCount && cbpos%256 != 0 {
-			fpos := cbpos % 256
-			f := uuid.New()
+			fpos = cbpos % 256
+			f = uuid.New()
 			copy(indirectP[fpos:fpos+16], f[:])
 			encryptAESStore(string(f[:]), HMACKey, AESKey, data[curBlock*configBlockSize:(curBlock+1)*configBlockSize])
 			curBlock++
@@ -283,6 +300,7 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) error 
 		encryptAESStore(string(doubleIndirectP[dpos*16:(dpos+1)*16]), HMACKey, AESKey, indirectP)
 	}
 	file.CurBlock = cbpos + 256 + 10
+	userlib.DebugMsg("cur block %d\n", file.CurBlock)
 	encryptAESStore(string(file.DoubleIndirectP), HMACKey, AESKey, doubleIndirectP)
 	return nil
 
