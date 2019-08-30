@@ -153,13 +153,13 @@ func encryptAESStore(key string, HMACKey []byte, AESKey []byte, data []byte) {
 
 func (file *fileInode) Load(offset int, HMACKey []byte, AESKey []byte) (data []byte, err error) {
 	blocks := offset
-	userlib.DebugMsg("hello cur block: %d", file.CurBlock, blocks)
+	userlib.DebugMsg("hello cur block: %d %d", file.CurBlock, blocks)
 	if blocks >= file.CurBlock {
 		err = errors.New("Access offset greater than size of file")
 		return
 	}
 	if blocks < 10 {
-		//userlib.DebugMsg("pointer %x\n", file.DirectP[blocks])
+		userlib.DebugMsg("pointer %x\n", file.DirectP[blocks])
 		data, err = decryptAESLoad(string(file.DirectP[blocks]), HMACKey, AESKey)
 		return
 	}
@@ -232,7 +232,7 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) error 
 		curBlock++
 	}
 	file.CurBlock = cbpos
-	userlib.DebugMsg("adfsf %d %d %d\n", file.CurBlock, curBlock, blockCount)
+	userlib.DebugMsg("file_cur_block curBlock blockCount %d %d %d\n", file.CurBlock, curBlock, blockCount)
 	if curBlock == blockCount {
 		return nil
 	}
@@ -285,22 +285,27 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) error 
 		}
 		fpos := cbpos % 256
 		f := uuid.New()
-		copy(indirectP[fpos:fpos+16], f[:])
+		//if cbpos%256 == 0 {
+		copy(indirectP[fpos*16:(fpos+1)*16], f[:])
 		encryptAESStore(string(f[:]), HMACKey, AESKey, data[curBlock*configBlockSize:(curBlock+1)*configBlockSize])
 		curBlock++
 		cbpos++
+		//}
 		userlib.DebugMsg("curBlock cbpos %d %d\n", curBlock, cbpos)
 		for curBlock < blockCount && cbpos%256 != 0 {
 			fpos = cbpos % 256
 			f = uuid.New()
+			userlib.DebugMsg("uuid %x\n", f[:])
 			copy(indirectP[fpos*16:(fpos+1)*16], f[:])
 			encryptAESStore(string(f[:]), HMACKey, AESKey, data[curBlock*configBlockSize:(curBlock+1)*configBlockSize])
 			curBlock++
 			cbpos++
 		}
+		userlib.DebugMsg("curBlock blockCount %d %d\n", curBlock, blockCount)
 		encryptAESStore(string(doubleIndirectP[dpos*16:(dpos+1)*16]), HMACKey, AESKey, indirectP)
 	}
 	file.CurBlock = cbpos + 256 + 10
+	userlib.DebugMsg("%s\n", "hello1")
 	userlib.DebugMsg("cur block %d\n", file.CurBlock)
 	encryptAESStore(string(file.DoubleIndirectP), HMACKey, AESKey, doubleIndirectP)
 	return nil
@@ -553,7 +558,8 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	}
 	userPubKey, ok := userlib.KeystoreGet(username)
 	if !ok {
-		panic("Public key not set for given user") //Handle with suitable error
+		err = errors.New("Public key not set for given user") //Handle with suitable error
+		return
 	}
 	h := userlib.NewSHA256()
 	h.Write([]byte(username + string(filename)))
@@ -728,9 +734,6 @@ func (userdata *User) LoadFile(filename string, offset int) (data []byte, err er
 	//}
 	//encFileName, err := userlib.RSAEncrypt(&userPubKey, []byte(filename), nil) //Check if we want to assign some label instead of nil
 	//userlib.DebugMsg(filename)
-	if err != nil {
-		return
-	}
 	h := userlib.NewSHA256()
 	h.Write([]byte(username + string(filename)))
 	datastoreKey := h.Sum(nil)
@@ -800,7 +803,78 @@ func (userdata *User) LoadFile(filename string, offset int) (data []byte, err er
 
 // ShareFile : Function used to the share file with other user
 func (userdata *User) ShareFile(filename string, recipient string) (msgid string, err error) {
-	return "ad", nil
+	username := userdata.Username
+	//userPubKey, ok := userlib.KeystoreGet(username)
+	//if !ok {
+	//panic("Public key not set for given user") //Handle with suitable error
+	//}
+	//encFileName, err := userlib.RSAEncrypt(&userPubKey, []byte(filename), nil) //Check if we want to assign some label instead of nil
+	//userlib.DebugMsg(filename)
+	h := userlib.NewSHA256()
+	h.Write([]byte(username + string(filename)))
+	datastoreKey := h.Sum(nil)
+	HMACKey := userlib.Argon2Key([]byte(username+filename), []byte(userdata.PasswordHash), uint32(userlib.HashSize))
+	sharingR, err := decryptRSALoad(string(datastoreKey), HMACKey, userdata.RSAPrivateKey)
+	sharingRecordKey := sharingR[:16]
+	sharingRecordHMACKey := sharingR[16 : 16+userlib.HashSize]
+	//userlib.DebugMsg("Load")
+	//userlib.DebugMsg("load %x ", (sharingRecordKey))
+	if sharingRecordKey == nil || err != nil {
+		err = errors.New("No such file exists")
+		return
+	}
+	//userlib.DebugMsg("load sharing record key %x", sharingRecordKey)
+	sharingRecordJsonByte, ok := userlib.DatastoreGet(string(sharingRecordKey))
+	//userlib.DebugMsg("load sharing record %x", sharingRecordJsonByte)
+
+	h2 := userlib.NewHMAC(sharingRecordHMACKey)
+	h2.Write(sharingRecordJsonByte[:len(sharingRecordJsonByte)-userlib.HashSize])
+	hmacVal2 := h2.Sum(nil)
+	hmacVal3 := sharingRecordJsonByte[len(sharingRecordJsonByte)-userlib.HashSize:]
+	if !userlib.Equal(hmacVal2, hmacVal3) {
+		err = errors.New("Data compromised")
+		return
+
+	}
+
+	sharingRecordJsonByte = sharingRecordJsonByte[:len(sharingRecordJsonByte)-userlib.HashSize]
+
+	var sharingRecord sharingRecord
+	err = json.Unmarshal(sharingRecordJsonByte, &sharingRecord)
+	if err != nil {
+		return
+	}
+	//userlib.DebugMsg("load owner of file %s", sharingRecord.Owner)
+	//hh, ok := sharingRecord.MUser[userdata.Username]
+	//userlib.DebugMsg("enclocation %x\n", hh.EncLocation)
+	if !ok {
+		err = errors.New("Data compromised")
+		return
+	}
+	fileLocation, err := userlib.RSADecrypt(userdata.RSAPrivateKey, []byte((sharingRecord.MUser[userdata.Username]).EncLocation), nil)
+	if err != nil {
+		return
+	}
+	//userlib.DebugMsg("load file location %x", fileLocation)
+	fileHMACKey, err := userlib.RSADecrypt(userdata.RSAPrivateKey, []byte((sharingRecord.MUser[userdata.Username]).EncHMACKey), nil)
+	if err != nil {
+		return
+	}
+	fileAESKey, err := userlib.RSADecrypt(userdata.RSAPrivateKey, []byte((sharingRecord.MUser[userdata.Username]).EncAESKey), nil)
+	if err != nil {
+		return
+
+	}
+	//sharingRecordKey + HMACKeySharingRecord + FileEncKey + FileHMACKey +  fileLocation
+
+	msgId := append(sharingRecordKey, append(sharingRecordHMACKey, append(fileAESKey, append(fileHMACKey, fileLocation...)...)...)...)
+
+	userPubKey, ok := userlib.KeystoreGet(username)
+
+	msgid = userlib.RSAEncrypt(&userPubKey, msgId, nil)
+	//sign :=
+
+	return
 }
 
 // ReceiveFile:Note recipient's filename can be different from the sender's filename.
