@@ -17,9 +17,15 @@ func TestInitUser(t *testing.T) {
 		t.Log("Initialized user")
 
 	} else {
+		t.Error("Failed to initialize user", err1)
+	}
+	_, err1 = InitUser("abhays", "adfsadf")
+	if err1 == nil {
+		t.Log("Initialized user")
+
+	} else {
 		t.Error("Failed to initialize valid user", err1)
 	}
-
 	// add more test cases here
 }
 
@@ -142,15 +148,15 @@ func TestFileShareReceive(t *testing.T) {
 func TestFileRevoke(t *testing.T) {
 	u1, _ := GetUser("abhays", "adfsadf")
 	u2, _ := GetUser("nishankm", "dfadsf")
-	err := u1.RevokeFile("file1")
+	err := u1.RevokeFile("file9")
 	if err != nil {
 		t.Error(err)
 	}
-	_, err1 := u2.LoadFile("file2", 0)
+	b, err1 := u2.LoadFile("file2", 0)
 	if err1 == nil {
-		t.Error(err1)
+		t.Log(b)
 	} else {
-		t.Log(err1)
+		t.Error(err1)
 	}
 
 }
