@@ -173,7 +173,7 @@ func (file *fileInode) Load(offset int, HMACKey []byte, AESKey []byte) (data []b
 	//return
 	//}
 	userlib.DebugMsg("hello blocks %d\n", blocks)
-	if blocks < 256 {
+	if blocks < 32 {
 		data, err = decryptAESLoad(string(file.IndirectP), HMACKey, AESKey)
 		if err != nil {
 			return
@@ -182,13 +182,13 @@ func (file *fileInode) Load(offset int, HMACKey []byte, AESKey []byte) (data []b
 		data, err = decryptAESLoad(string(mblock), HMACKey, AESKey)
 		return
 	}
-	blocks -= 256
+	blocks -= 32
 	//if blocks == 0 {
 	//return
 	//}
 	userlib.DebugMsg("hello load blocks %d\n", blocks)
-	indblock := blocks / 256
-	dirblock := blocks % 256
+	indblock := blocks / 32
+	dirblock := blocks % 32
 	data, err = decryptAESLoad(string(file.DoubleIndirectP), HMACKey, AESKey)
 	userlib.DebugMsg("direct block address %x", data)
 
@@ -244,15 +244,15 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) error 
 	if cbpos == 10 {
 		f := uuid.New()
 		file.IndirectP = (f[:])
-		encryptAESStore(string(file.IndirectP), HMACKey, AESKey, make([]byte, 256*16))
+		encryptAESStore(string(file.IndirectP), HMACKey, AESKey, make([]byte, 32*16))
 	}
 	cbpos -= 10
-	if cbpos < 256 {
+	if cbpos < 32 {
 		directp, err := decryptAESLoad(string(file.IndirectP), HMACKey, AESKey)
 		if err != nil {
 			return err
 		}
-		for curBlock < blockCount && cbpos < 256 {
+		for curBlock < blockCount && cbpos < 32 {
 			f := uuid.New()
 			copy(directp[cbpos*16:(cbpos+1)*16], f[:])
 			encryptAESStore(string(directp[cbpos*16:(cbpos+1)*16]), HMACKey, AESKey, data[curBlock*configBlockSize:(curBlock+1)*(configBlockSize)])
@@ -267,28 +267,28 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) error 
 		return nil
 	}
 	userlib.DebugMsg("cbpos %d %d %d\n", cbpos, curBlock, blockCount)
-	if cbpos == 256 {
+	if cbpos == 32 {
 		f := uuid.New()
 		file.DoubleIndirectP = (f[:])
-		encryptAESStore(string(file.DoubleIndirectP), HMACKey, AESKey, make([]byte, 256*16))
+		encryptAESStore(string(file.DoubleIndirectP), HMACKey, AESKey, make([]byte, 32*16))
 	}
-	cbpos -= 256
+	cbpos -= 32
 	doubleIndirectP, err := decryptAESLoad(string(file.DoubleIndirectP), HMACKey, AESKey)
 	if err != nil {
 		return err
 	}
 	for curBlock < blockCount {
-		dpos := cbpos / 256
-		if cbpos%256 == 0 {
+		dpos := cbpos / 32
+		if cbpos%32 == 0 {
 			f := uuid.New()
 			copy(doubleIndirectP[dpos*16:(dpos+1)*16], f[:])
-			encryptAESStore(string(doubleIndirectP[dpos*16:(dpos+1)*16]), HMACKey, AESKey, make([]byte, 256*16))
+			encryptAESStore(string(doubleIndirectP[dpos*16:(dpos+1)*16]), HMACKey, AESKey, make([]byte, 32*16))
 		}
 		indirectP, err := decryptAESLoad(string(doubleIndirectP[dpos*16:(dpos+1)*16]), HMACKey, AESKey)
 		if err != nil {
 			return err
 		}
-		fpos := cbpos % 256
+		fpos := cbpos % 32
 		f := uuid.New()
 		//if cbpos%256 == 0 {
 		copy(indirectP[fpos*16:(fpos+1)*16], f[:])
@@ -297,8 +297,8 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) error 
 		cbpos++
 		//}
 		userlib.DebugMsg("curBlock cbpos %d %d\n", curBlock, cbpos)
-		for curBlock < blockCount && cbpos%256 != 0 {
-			fpos = cbpos % 256
+		for curBlock < blockCount && cbpos%32 != 0 {
+			fpos = cbpos % 32
 			f = uuid.New()
 			userlib.DebugMsg("uuid %x\n", f[:])
 			copy(indirectP[fpos*16:(fpos+1)*16], f[:])
@@ -309,7 +309,7 @@ func (file *fileInode) Append(data []byte, HMACKey []byte, AESKey []byte) error 
 		userlib.DebugMsg("curBlock blockCount %d %d\n", curBlock, blockCount)
 		encryptAESStore(string(doubleIndirectP[dpos*16:(dpos+1)*16]), HMACKey, AESKey, indirectP)
 	}
-	file.CurBlock = cbpos + 256 + 10
+	file.CurBlock = cbpos + 32 + 10
 	userlib.DebugMsg("%s\n", "hello1")
 	userlib.DebugMsg("cur block %d\n", file.CurBlock)
 	encryptAESStore(string(file.DoubleIndirectP), HMACKey, AESKey, doubleIndirectP)
@@ -380,7 +380,6 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 	//SO, COMMENTING BELOW LINE
 
 	//encFileName, err := userlib.RSAEncrypt(&userPubKey, []byte(filename), nil) //Check if we want to assign some label instead of nil
-
 
 	encFileName := Hash([]byte(filename))
 
@@ -1071,8 +1070,6 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 }
 
 // RevokeFile : function used revoke the shared file access
-
-
 
 func (userdata *User) RevokeFile(filename string) (err error) {
 	sharingRecord, err1 := userdata.GetSharingRecord(userdata.Username, filename)
