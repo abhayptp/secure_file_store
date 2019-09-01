@@ -148,15 +148,20 @@ func TestFileShareReceive(t *testing.T) {
 func TestFileRevoke(t *testing.T) {
 	u1, _ := GetUser("abhays", "adfsadf")
 	u2, _ := GetUser("nishankm", "dfadsf")
-	err := u1.RevokeFile("file9")
+
+
+	err := u1.RevokeFile("file1")
 	if err != nil {
 		t.Error(err)
 	}
 	b, err1 := u2.LoadFile("file2", 0)
 	if err1 == nil {
-		t.Log(b)
+		t.Error(b)
 	} else {
-		t.Error(err1)
+		t.Log(err1)
 	}
-
+	err2 := u2.StoreFile("file2", userlib.RandomBytes(4096))
+	if err2 != nil {
+		t.Error(err)
+	}
 }
