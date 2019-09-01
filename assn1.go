@@ -1060,10 +1060,10 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 	//Below, EncFileName denotes hash of file name
 
 	// Remove all user's data from sharingRecord except owner
-	for k := range sharingRecord.MUser {
+	for k,v := range sharingRecord.MUser {
 		if k != ownerName {
-			// h1 := Hash([]byte(k + string(v.EncFileName)))
-			// userlib.DatastoreDelete(string(h1))
+			h1 := Hash([]byte(k + string(v.EncFileName)))
+			userlib.DatastoreSet(string(h1), nil)
 			delete(sharingRecord.MUser, k)
 		}
 	}
